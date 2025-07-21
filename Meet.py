@@ -43,6 +43,34 @@ sl_pct = st.sidebar.number_input(
     help="Set your stop loss percentage"
 )
 
+# Function to standardize date format
+def standardize_date_format(date_str):
+    """Convert various date formats to consistent format"""
+    if pd.isna(date_str) or date_str == '':
+        return None
+        
+    date_str = str(date_str).strip()
+    
+    # List of possible date formats
+    date_formats = [
+        '%d/%m/%Y',    # 03/12/2024
+        '%d-%m-%Y',    # 18-12-2024
+        '%m/%d/%Y',    # 12/03/2024
+        '%Y-%m-%d',    # 2024-12-03
+        '%d/%m/%y',    # 03/12/24
+        '%d-%m-%y',    # 18-12-24
+    ]
+    
+    for fmt in date_formats:
+        try:
+            # Parse the date and return datetime object
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    
+    # If no format matches, return None
+    return None
+
 # Function to get stock price data
 @st.cache_data
 def get_stock_price(symbol, date):
@@ -54,20 +82,11 @@ def get_stock_price(symbol, date):
         else:
             symbol_formatted = symbol
             
-        # Convert date string to datetime
+        # Convert date string to datetime if needed
         if isinstance(date, str):
-            try:
-                # Handle different date formats
-                if '/' in date:
-                    date = datetime.strptime(date, '%d/%m/%Y')
-                elif '-' in date:
-                    date = datetime.strptime(date, '%d-%m-%Y')
-            except:
-                # Try alternative formats
-                try:
-                    date = datetime.strptime(date, '%m/%d/%Y')
-                except:
-                    date = datetime.strptime(date, '%Y-%m-%d')
+            date = standardize_date_format(date)
+            if date is None:
+                return None
         
         # Get data for a week around the date to handle weekends/holidays
         start_date = date - timedelta(days=7)
@@ -104,18 +123,11 @@ def check_target_or_sl_first(symbol, entry_date, entry_price, target_price, sl_p
         else:
             symbol_formatted = symbol
             
-        # Convert date if string
+        # Convert date string to datetime if needed
         if isinstance(entry_date, str):
-            try:
-                if '/' in entry_date:
-                    entry_date = datetime.strptime(entry_date, '%d/%m/%Y')
-                elif '-' in entry_date:
-                    entry_date = datetime.strptime(entry_date, '%d-%m-%Y')
-            except:
-                try:
-                    entry_date = datetime.strptime(entry_date, '%m/%d/%Y')
-                except:
-                    entry_date = datetime.strptime(entry_date, '%Y-%m-%d')
+            entry_date = standardize_date_format(entry_date)
+            if entry_date is None:
+                return "Invalid Date"
         
         # Get data for next 30 days
         start_date = entry_date
@@ -162,9 +174,23 @@ def main():
             # Read the uploaded file
             df = pd.read_excel(uploaded_file)
             
+            # Auto-fix date formats before processing
+            st.info("🔧 Auto-fixing date formats...")
+            df['date'] = df['date'].apply(lambda x: standardize_date_format(str(x)) if pd.notna(x) else None)
+            
+            # Remove rows with invalid dates
+            initial_count = len(df)
+            df = df.dropna(subset=['date'])
+            removed_count = initial_count - len(df)
+            
+            if removed_count > 0:
+                st.warning(f"⚠️ Removed {removed_count} rows with invalid dates")
+            
             # Display original data
-            st.subheader("📊 Original Data")
-            st.dataframe(df.head(10))
+            st.subheader("📊 Data Preview (After Date Standardization)")
+            preview_df = df.copy()
+            preview_df['date'] = preview_df['date'].dt.strftime('%d/%m/%Y')
+            st.dataframe(preview_df.head(10))
             
             # Check if required columns exist
             required_columns = ['date', 'symbol', 'marketcapname', 'sector']
